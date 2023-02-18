@@ -1,8 +1,8 @@
 <rss xmlns:atom="http://www.w3.org/2005/Atom" version="2.0">
     <channel>
-        <title>Categories - Category - Mrfire Site</title>
+        <title>Categories - Category - Mrfireboy</title>
         <link>http://example.org/categories/</link>
-        <description>Categories - Category - Mrfire Site</description>
-        <generator>Hugo -- gohugo.io</generator><language>zh-CN</language><managingEditor>442498598@qq.com (cf)</managingEditor>
-            <webMaster>442498598@qq.com (cf)</webMaster><atom:link href="http://example.org/categories/" rel="self" type="application/rss+xml" /></channel>
+        <description>Categories - Category - Mrfireboy</description>
+        <generator>Hugo -- gohugo.io</generator><language>en</language><managingEditor>442498598@qq.com (mrfireboy)</managingEditor>
+            <webMaster>442498598@qq.com (mrfireboy)</webMaster><atom:link href="http://example.org/categories/" rel="self" type="application/rss+xml" /></channel>
 </rss>
