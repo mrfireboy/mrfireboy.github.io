@@ -12,7 +12,7 @@
     <pubDate>Wed, 15 Feb 2023 23:13:16 &#43;0800</pubDate>
     <author>mrfireboy</author>
     <guid>http://example.org/posts/first_post/</guid>
-    <description><![CDATA[first blog 11111 ]]></description>
+    <description><![CDATA[first test blog 近日，上海儿童医学中心与东华大学合作开发了一种多功能甘油水凝胶作为生物墨水， 其抑菌性、形状保真、适合3D生物打印和细胞冻存保护等一系列特性，为再生医学研究拓宽了前景， 该研究成果已经在权威期刊《Matter》在线发表。 Lighthouse (figure) &lt;section id=&#34;main&#34;&gt; &lt;div&gt; &lt;h1 id=&#34;title&#34;&gt;{{ .Title }}&lt;/h1&gt; {{ range .Pages }} {{ .Render &#34;summary&#34;}} {{ end }} &lt;/div&gt; &lt;/section&gt; &lt;section id=&#34;main&#34;&gt; &lt;div&gt; &lt;h1 id=&#34;title&#34;&gt;{{ .Title }}&lt;/h1&gt; {{ range .Pages }} {{ .Render &#34;summary&#34;}} {{ end }} &lt;/div&gt; &lt;/section&gt; ]]></description>
 </item>
 </channel>
 </rss>
