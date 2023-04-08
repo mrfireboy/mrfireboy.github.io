@@ -4,7 +4,20 @@
         <link>http://example.org/categories/linux/</link>
         <description>linux - Category - Mrfireboy</description>
         <generator>Hugo -- gohugo.io</generator><language>en</language><managingEditor>442498598@qq.com (mrfireboy)</managingEditor>
-            <webMaster>442498598@qq.com (mrfireboy)</webMaster><lastBuildDate>Wed, 15 Feb 2023 23:13:16 &#43;0800</lastBuildDate><atom:link href="http://example.org/categories/linux/" rel="self" type="application/rss+xml" /><item>
+            <webMaster>442498598@qq.com (mrfireboy)</webMaster><lastBuildDate>Wed, 15 Mar 2023 23:13:16 &#43;0800</lastBuildDate><atom:link href="http://example.org/categories/linux/" rel="self" type="application/rss+xml" /><item>
+    <title>harbor高可用</title>
+    <link>http://example.org/posts/harbor-ha20230408/</link>
+    <pubDate>Wed, 15 Mar 2023 23:13:16 &#43;0800</pubDate>
+    <author>mrfireboy</author>
+    <guid>http://example.org/posts/harbor-ha20230408/</guid>
+    <description><![CDATA[harbor高可用实现 高可用简介 harbor当前两种主流高可用方案：
+多harbor实例共享后端存储 双主复制，harbor自带的镜像复制功能 方案一简图：
+方案二简图：
+双主复制架构在遇到大镜像时也有同步延迟，并且如果一个实例出现故障需要重新开启复制策略才能再次同步。实际使用下来发现自带的复制功能也不稳定。
+多harbor实例共享后端存储实现 该方案需要注意以下几点：
+共享存储的选取，Harbor的后端存储目前支持本地文件系统、NFS、CephFS、azure、gcs、AWS s3,、swift 以及阿里云oss。 Session在不同的实例上共享，在2.6.2的版本中发现需要在LB层开启ip hash,否则无法登录。 由于PostgreSQL多个实例无法共享一份数据文件，需要将harbor中的数据库拆出来独立部署，让多实例共用一个外部数据库，并将Harbor中默认创建在PostgreSQL的所有表的结构、初始数据等导入进单独部署的PostgreSQL服务中，PostgreSQL数据的冗余可以使用PostgreSQL的同步策略来实现。 资源清单 资源类型 数量 配置 ECS实例 2 centos7 2c4g NAS实例 1 支持nfs RDS实例 1 pg10 1c4g REDIS实例 1 1c1g LB实例 1 准备 PostgreSQL(10) #安装客户端 sudo yum install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm yum install -y postgresql11-server #连接数据库 psql -h postgresql10.rdsgxtki0z54moh.agilecloud.com -U postgresadmin -p 3306 -d postgres #创建对应的库 下面是展示，具体执行create database xx即可 pg默认安装的库可以不用管它。 postgres=&gt; \l List of databases Name | Owner | Encoding | Collate | Ctype | Access privileges ----------------+---------------+----------+-------------+-------------+------------------- notary_servers | postgresadmin | UTF8 | zh_CN.]]></description>
+</item>
+<item>
     <title>First_post</title>
     <link>http://example.org/posts/first_post/</link>
     <pubDate>Wed, 15 Feb 2023 23:13:16 &#43;0800</pubDate>
