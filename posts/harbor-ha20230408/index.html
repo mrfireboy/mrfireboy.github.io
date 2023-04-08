@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="robots" content="noodp" />
+        <title> - Mrfireboy</title><meta name="Description" content="宝剑锋从磨砺出"><meta property="og:title" content="" />
+<meta property="og:description" content="harbor高可用实现 高可用简介 harbor当前两种主流高可用方案：
+多harbor实例共享后端存储 双主复制，harbor自带的镜像复制功能 方案一简图：
+方案二简图：
+双主复制架构在遇到大镜像时也有同步延迟，并且如果一个实例出现故障需要重新开启复制策略才能再次同步。实际使用下来发现自带的复制功能也不稳定。
+多harbor实例共享后端存储实现 该方案需要注意以下几点：
+共享存储的选取，Harbor的后端存储目前支持本地文件系统、NFS、CephFS、azure、gcs、AWS s3,、swift 以及阿里云oss。 Session在不同的实例上共享，在2.6.2的版本中发现需要在LB层开启ip hash,否则无法登录。 由于PostgreSQL多个实例无法共享一份数据文件，需要将harbor中的数据库拆出来独立部署，让多实例共用一个外部数据库，并将Harbor中默认创建在PostgreSQL的所有表的结构、初始数据等导入进单独部署的PostgreSQL服务中，PostgreSQL数据的冗余可以使用PostgreSQL的同步策略来实现。 资源清单 资源类型 数量 配置 ECS实例 2 centos7 2c4g NAS实例 1 支持nfs RDS实例 1 pg10 1c4g REDIS实例 1 1c1g LB实例 1 准备 PostgreSQL(10) #安装客户端 sudo yum install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm yum install -y postgresql11-server #连接数据库 psql -h postgresql10.rdsgxtki0z54moh.agilecloud.com -U postgresadmin -p 3306 -d postgres #创建对应的库 下面是展示，具体执行create database xx即可 pg默认安装的库可以不用管它。 postgres=&gt; \l List of databases Name | Owner | Encoding | Collate | Ctype | Access privileges ----------------&#43;---------------&#43;----------&#43;-------------&#43;-------------&#43;------------------- notary_servers | postgresadmin | UTF8 | zh_CN." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://example.org/posts/harbor-ha20230408/" /><meta property="og:image" content="http://example.org/logo.png"/><meta property="article:section" content="posts" />
+
+<meta property="og:site_name" content="mrfireboy" />
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:image" content="http://example.org/logo.png"/>
+
+<meta name="twitter:title" content=""/>
+<meta name="twitter:description" content="harbor高可用实现 高可用简介 harbor当前两种主流高可用方案：
+多harbor实例共享后端存储 双主复制，harbor自带的镜像复制功能 方案一简图：
+方案二简图：
+双主复制架构在遇到大镜像时也有同步延迟，并且如果一个实例出现故障需要重新开启复制策略才能再次同步。实际使用下来发现自带的复制功能也不稳定。
+多harbor实例共享后端存储实现 该方案需要注意以下几点：
+共享存储的选取，Harbor的后端存储目前支持本地文件系统、NFS、CephFS、azure、gcs、AWS s3,、swift 以及阿里云oss。 Session在不同的实例上共享，在2.6.2的版本中发现需要在LB层开启ip hash,否则无法登录。 由于PostgreSQL多个实例无法共享一份数据文件，需要将harbor中的数据库拆出来独立部署，让多实例共用一个外部数据库，并将Harbor中默认创建在PostgreSQL的所有表的结构、初始数据等导入进单独部署的PostgreSQL服务中，PostgreSQL数据的冗余可以使用PostgreSQL的同步策略来实现。 资源清单 资源类型 数量 配置 ECS实例 2 centos7 2c4g NAS实例 1 支持nfs RDS实例 1 pg10 1c4g REDIS实例 1 1c1g LB实例 1 准备 PostgreSQL(10) #安装客户端 sudo yum install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm yum install -y postgresql11-server #连接数据库 psql -h postgresql10.rdsgxtki0z54moh.agilecloud.com -U postgresadmin -p 3306 -d postgres #创建对应的库 下面是展示，具体执行create database xx即可 pg默认安装的库可以不用管它。 postgres=&gt; \l List of databases Name | Owner | Encoding | Collate | Ctype | Access privileges ----------------&#43;---------------&#43;----------&#43;-------------&#43;-------------&#43;------------------- notary_servers | postgresadmin | UTF8 | zh_CN."/>
+<meta name="application-name" content="mrfireboy">
+<meta name="apple-mobile-web-app-title" content="mrfireboy"><meta name="theme-color" content="#ffffff"><meta name="msapplication-TileColor" content="#da532c"><link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5"><link rel="manifest" href="/site.webmanifest"><link rel="canonical" href="http://example.org/posts/harbor-ha20230408/" /><link rel="next" href="http://example.org/posts/first_post/" /><link rel="stylesheet" href="/css/style.min.css"><link rel="preload" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.1.1/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+        <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.1.1/css/all.min.css"></noscript><link rel="preload" href="https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+        <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css"></noscript><script type="application/ld+json">
+    {
+        "@context": "http://schema.org",
+        "@type": "BlogPosting",
+        "headline": "",
+        "inLanguage": "en",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "http:\/\/example.org\/posts\/harbor-ha20230408\/"
+        },"genre": "posts","wordcount":  491 ,
+        "url": "http:\/\/example.org\/posts\/harbor-ha20230408\/","publisher": {
+            "@type": "Organization",
+            "name": ""},"author": {
+                "@type": "Person",
+                "name": "mrfireboy"
+            },"description": ""
+    }
+    </script></head>
+    <body data-header-desktop="fixed" data-header-mobile="auto"><script type="text/javascript">(window.localStorage && localStorage.getItem('theme') ? localStorage.getItem('theme') === 'dark' : ('auto' === 'auto' ? window.matchMedia('(prefers-color-scheme: dark)').matches : 'auto' === 'dark')) && document.body.setAttribute('theme', 'dark');</script>
+
+        <div id="mask"></div><div class="wrapper"><header class="desktop" id="header-desktop">
+    <div class="header-wrapper">
+        <div class="header-title">
+            <a href="/" title="Mrfireboy"><span id="id-1" class="typeit"></span></a>
+        </div>
+        <div class="menu">
+            <div class="menu-inner"><a class="menu-item" href="/posts/"> Posts </a><a class="menu-item" href="/tags/"> Tags </a><a class="menu-item" href="/categories/"> Categories </a><a class="menu-item" href="/docs/"> Docs </a><a class="menu-item" href="/about/"> About </a><span class="menu-item delimiter"></span><span class="menu-item search" id="search-desktop">
+                        <input type="text" placeholder="Search titles or contents..." id="search-input-desktop">
+                        <a href="javascript:void(0);" class="search-button search-toggle" id="search-toggle-desktop" title="Search">
+                            <i class="fas fa-search fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <a href="javascript:void(0);" class="search-button search-clear" id="search-clear-desktop" title="Clear">
+                            <i class="fas fa-times-circle fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <span class="search-button search-loading" id="search-loading-desktop">
+                            <i class="fas fa-spinner fa-fw fa-spin" aria-hidden="true"></i>
+                        </span>
+                    </span><a href="javascript:void(0);" class="menu-item theme-switch" title="Switch Theme">
+                    <i class="fas fa-adjust fa-fw" aria-hidden="true"></i>
+                </a></div>
+        </div>
+    </div>
+</header><header class="mobile" id="header-mobile">
+    <div class="header-container">
+        <div class="header-wrapper">
+            <div class="header-title">
+                <a href="/" title="Mrfireboy"><span id="id-2" class="typeit"></span></a>
+            </div>
+            <div class="menu-toggle" id="menu-toggle-mobile">
+                <span></span><span></span><span></span>
+            </div>
+        </div>
+        <div class="menu" id="menu-mobile"><div class="search-wrapper">
+                    <div class="search mobile" id="search-mobile">
+                        <input type="text" placeholder="Search titles or contents..." id="search-input-mobile">
+                        <a href="javascript:void(0);" class="search-button search-toggle" id="search-toggle-mobile" title="Search">
+                            <i class="fas fa-search fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <a href="javascript:void(0);" class="search-button search-clear" id="search-clear-mobile" title="Clear">
+                            <i class="fas fa-times-circle fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <span class="search-button search-loading" id="search-loading-mobile">
+                            <i class="fas fa-spinner fa-fw fa-spin" aria-hidden="true"></i>
+                        </span>
+                    </div>
+                    <a href="javascript:void(0);" class="search-cancel" id="search-cancel-mobile">
+                        Cancel
+                    </a>
+                </div><a class="menu-item" href="/posts/" title="">Posts</a><a class="menu-item" href="/tags/" title="">Tags</a><a class="menu-item" href="/categories/" title="">Categories</a><a class="menu-item" href="/docs/" title="">Docs</a><a class="menu-item" href="/about/" title="">About</a><a href="javascript:void(0);" class="menu-item theme-switch" title="Switch Theme">
+                <i class="fas fa-adjust fa-fw" aria-hidden="true"></i>
+            </a></div>
+    </div>
+</header><div class="search-dropdown desktop">
+        <div id="search-dropdown-desktop"></div>
+    </div>
+    <div class="search-dropdown mobile">
+        <div id="search-dropdown-mobile"></div>
+    </div><main class="main">
+                <div class="container"><div class="toc" id="toc-auto">
+            <h2 class="toc-title">Contents</h2>
+            <div class="toc-content" id="toc-content-auto"></div>
+        </div><article class="page single"><h1 class="single-title animate__animated animate__flipInX"></h1><div class="post-meta">
+            <div class="post-meta-line"><span class="post-author"><a href="/" title="Author" rel="author" class="author"><i class="fas fa-user-circle fa-fw" aria-hidden="true"></i>mrfireboy</a></span></div>
+            <div class="post-meta-line"><i class="far fa-calendar-alt fa-fw" aria-hidden="true"></i>&nbsp;<time datetime="0001-01-01">0001-01-01</time>&nbsp;<i class="fas fa-pencil-alt fa-fw" aria-hidden="true"></i>&nbsp;491 words&nbsp;
+                <i class="far fa-clock fa-fw" aria-hidden="true"></i>&nbsp;3 minutes&nbsp;</div>
+        </div><div class="details toc" id="toc-static"  data-kept="true">
+                <div class="details-summary toc-title">
+                    <span>Contents</span>
+                    <span><i class="details-icon fas fa-angle-right" aria-hidden="true"></i></span>
+                </div>
+                <div class="details-content toc-content" id="toc-content-static"><nav id="TableOfContents">
+  <ul>
+    <li><a href="#高可用简介">高可用简介</a></li>
+    <li><a href="#多harbor实例共享后端存储实现">多harbor实例共享后端存储实现</a>
+      <ul>
+        <li><a href="#资源清单">资源清单</a></li>
+        <li><a href="#准备-postgresql10">准备 PostgreSQL(10)</a></li>
+        <li><a href="#准备redis60">准备Redis（6.0）</a></li>
+        <li><a href="#挂载共享存储两台ecs都需同样操作">挂载共享存储(两台ecs都需同样操作）</a></li>
+        <li><a href="#harbor安装">harbor安装</a></li>
+      </ul>
+    </li>
+    <li><a href="#lb配置">lb配置</a></li>
+    <li><a href="#测试">测试</a>
+      <ul>
+        <li><a href="#登录harbor仓库">登录harbor仓库</a></li>
+        <li><a href="#上传镜像">上传镜像</a></li>
+        <li><a href="#拉取镜像">拉取镜像</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav></div>
+            </div><div class="content" id="content"><h1 id="harbor高可用实现">harbor高可用实现</h1>
+<h2 id="高可用简介">高可用简介</h2>
+<p>harbor当前两种主流高可用方案：</p>
+<ul>
+<li>多harbor实例共享后端存储</li>
+<li>双主复制，harbor自带的镜像复制功能</li>
+</ul>
+<p>方案一简图：</p>
+<!-- raw HTML omitted -->
+<p>方案二简图：</p>
+<!-- raw HTML omitted -->
+<p>双主复制架构在遇到大镜像时也有同步延迟，并且如果一个实例出现故障需要重新开启复制策略才能再次同步。实际使用下来发现自带的复制功能也不稳定。</p>
+<h2 id="多harbor实例共享后端存储实现">多harbor实例共享后端存储实现</h2>
+<!-- raw HTML omitted -->
+<p>该方案需要注意以下几点：</p>
+<ol>
+<li>共享存储的选取，Harbor的后端存储目前支持本地文件系统、NFS、CephFS、azure、gcs、AWS s3,、swift 以及阿里云oss。</li>
+<li>Session在不同的实例上共享，在2.6.2的版本中发现需要在LB层开启ip hash,否则无法登录。</li>
+<li>由于PostgreSQL多个实例无法共享一份数据文件，需要将harbor中的数据库拆出来独立部署，让多实例共用一个外部数据库，并将Harbor中默认创建在PostgreSQL的所有表的结构、初始数据等导入进单独部署的PostgreSQL服务中，PostgreSQL数据的冗余可以使用PostgreSQL的同步策略来实现。</li>
+</ol>
+<h3 id="资源清单">资源清单</h3>
+<table>
+<thead>
+<tr>
+<th>资源类型</th>
+<th>数量</th>
+<th>配置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ECS实例</td>
+<td>2</td>
+<td>centos7 2c4g</td>
+</tr>
+<tr>
+<td>NAS实例</td>
+<td>1</td>
+<td>支持nfs</td>
+</tr>
+<tr>
+<td>RDS实例</td>
+<td>1</td>
+<td>pg10 1c4g</td>
+</tr>
+<tr>
+<td>REDIS实例</td>
+<td>1</td>
+<td>1c1g</td>
+</tr>
+<tr>
+<td>LB实例</td>
+<td>1</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="准备-postgresql10">准备 PostgreSQL(10)</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1">#安装客户端</span>
+</span></span><span class="line"><span class="cl">sudo yum install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+</span></span><span class="line"><span class="cl">yum install -y postgresql11-server
+</span></span><span class="line"><span class="cl"><span class="c1">#连接数据库</span>
+</span></span><span class="line"><span class="cl">psql -h postgresql10.rdsgxtki0z54moh.agilecloud.com -U postgresadmin -p <span class="m">3306</span> -d postgres
+</span></span><span class="line"><span class="cl"><span class="c1">#创建对应的库 下面是展示，具体执行create database xx即可 pg默认安装的库可以不用管它。</span>
+</span></span><span class="line"><span class="cl"><span class="nv">postgres</span><span class="o">=</span>&gt; <span class="se">\l</span>
+</span></span><span class="line"><span class="cl">                                     List of databases
+</span></span><span class="line"><span class="cl">      Name      <span class="p">|</span>     Owner     <span class="p">|</span> Encoding <span class="p">|</span>   Collate   <span class="p">|</span>    Ctype    <span class="p">|</span> Access privileges
+</span></span><span class="line"><span class="cl">----------------+---------------+----------+-------------+-------------+-------------------
+</span></span><span class="line"><span class="cl"> notary_servers <span class="p">|</span> postgresadmin <span class="p">|</span> UTF8     <span class="p">|</span> zh_CN.utf-8 <span class="p">|</span> zh_CN.utf-8 <span class="p">|</span>
+</span></span><span class="line"><span class="cl"> notary_signer  <span class="p">|</span> postgresadmin <span class="p">|</span> UTF8     <span class="p">|</span> zh_CN.utf-8 <span class="p">|</span> zh_CN.utf-8 <span class="p">|</span>
+</span></span><span class="line"><span class="cl"> registry       <span class="p">|</span> postgresadmin <span class="p">|</span> UTF8     <span class="p">|</span> zh_CN.utf-8 <span class="p">|</span> zh_CN.utf-8 <span class="p">|</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span></code></pre></div><h3 id="准备redis60">准备Redis（6.0）</h3>
+<p>云平台执行购买高可用的，获取一下对应的连接地址和密码即可。</p>
+<h3 id="挂载共享存储两台ecs都需同样操作">挂载共享存储(两台ecs都需同样操作）</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="o">[</span>root@cf ~<span class="o">]</span><span class="c1">#yum install nfs-utils</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@cf ~<span class="o">]</span><span class="c1">#echo &#34;options sunrpc tcp_slot_table_entries=128&#34; &gt;&gt; /etc/modprobe.d/sunrpc.conf</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@cf ~<span class="o">]</span><span class="c1">#echo &#34;options sunrpc tcp_max_slot_table_entries=128&#34; &gt;&gt; /etc/modprobe.d/sunrpc.conf</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@cf ~<span class="o">]</span><span class="c1">#mkdir /data</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@cf ~<span class="o">]</span><span class="c1">#mount -t nfs4 -o minorversion=1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport xx.xx.com:/ /data #参考对应云挂载nas的路径</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@cf ~<span class="o">]</span><span class="c1"># df -h</span>
+</span></span><span class="line"><span class="cl">Filesystem                                   Size  Used Avail Use% Mounted on
+</span></span><span class="line"><span class="cl">devtmpfs                                     2.0G     <span class="m">0</span>  2.0G   0% /dev
+</span></span><span class="line"><span class="cl">tmpfs                                        2.0G   64K  2.0G   1% /dev/shm
+</span></span><span class="line"><span class="cl">tmpfs                                        2.0G  2.0M  2.0G   1% /run
+</span></span><span class="line"><span class="cl">tmpfs                                        2.0G     <span class="m">0</span>  2.0G   0% /sys/fs/cgroup
+</span></span><span class="line"><span class="cl">/dev/vda1                                     40G  6.7G   31G  18% /
+</span></span><span class="line"><span class="cl">tmpfs                                        394M     <span class="m">0</span>  394M   0% /run/user/0
+</span></span><span class="line"><span class="cl">/dev/vdb1                                     99G  1.2G   93G   2% /DISK2
+</span></span><span class="line"><span class="cl">xx.xx.com:/  1.0P   70G  1.0P   1% /data <span class="c1">#重点</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#注意这里自己设置到/etc/fstab开机自动挂载吧</span>
+</span></span></code></pre></div><h3 id="harbor安装">harbor安装</h3>
+<h4 id="docker基础安装">docker基础安装</h4>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1">#移除老的docker</span>
+</span></span><span class="line"><span class="cl">sudo yum remove docker <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>                  docker-client <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>                  docker-client-latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>                  docker-common <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>                  docker-latest <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>                  docker-latest-logrotate <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>                  docker-logrotate <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>                  docker-engine
+</span></span><span class="line"><span class="cl"><span class="c1">#配置docker安装的yum源</span>
+</span></span><span class="line"><span class="cl">sudo yum install -y yum-utils
+</span></span><span class="line"><span class="cl">sudo yum-config-manager <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>--add-repo <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+</span></span><span class="line"><span class="cl"><span class="c1">#安装docker</span>
+</span></span><span class="line"><span class="cl">sudo yum install -y docker-ce docker-ce-cli containerd.io
+</span></span><span class="line"><span class="cl"><span class="c1">#启动</span>
+</span></span><span class="line"><span class="cl">systemctl <span class="nb">enable</span> docker --now
+</span></span><span class="line"><span class="cl"><span class="c1">#配置加速</span>
+</span></span><span class="line"><span class="cl">sudo mkdir -p /etc/docker
+</span></span><span class="line"><span class="cl">sudo tee /etc/docker/daemon.json <span class="s">&lt;&lt;-&#39;EOF&#39;
+</span></span></span><span class="line"><span class="cl"><span class="s">{
+</span></span></span><span class="line"><span class="cl"><span class="s">  &#34;registry-mirrors&#34;: [&#34;https://xxxx.mirror.aliyuncs.com&#34;],#这一段改成自己的吧！
+</span></span></span><span class="line"><span class="cl"><span class="s">  &#34;exec-opts&#34;: [&#34;native.cgroupdriver=systemd&#34;],
+</span></span></span><span class="line"><span class="cl"><span class="s">  &#34;data-root&#34;: &#34;/DISK2/docker&#34;,#注意这里，后面会单独挂个数据盘
+</span></span></span><span class="line"><span class="cl"><span class="s">  &#34;log-driver&#34;: &#34;json-file&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="s">  &#34;log-opts&#34;: {
+</span></span></span><span class="line"><span class="cl"><span class="s">    &#34;max-size&#34;: &#34;100m&#34;
+</span></span></span><span class="line"><span class="cl"><span class="s">  },
+</span></span></span><span class="line"><span class="cl"><span class="s">  &#34;storage-driver&#34;: &#34;overlay2&#34;
+</span></span></span><span class="line"><span class="cl"><span class="s">}
+</span></span></span><span class="line"><span class="cl"><span class="s">EOF</span>
+</span></span><span class="line"><span class="cl">sudo systemctl daemon-reload
+</span></span><span class="line"><span class="cl">sudo systemctl restart docker
+</span></span></code></pre></div><p>注意新版的docker安装会把docker-compose也安装上。</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="o">[</span>root@cf ~<span class="o">]</span><span class="c1"># docker info | grep compose</span>
+</span></span><span class="line"><span class="cl">  compose: Docker Compose <span class="o">(</span>Docker Inc.<span class="o">)</span>
+</span></span><span class="line"><span class="cl">    Path:     /usr/libexec/docker/cli-plugins/docker-compose
+</span></span></code></pre></div><p>如果没有对应docker-compose，可以自行安装，参考baidu吧</p>
+<h4 id="安装harbor两台ecs都需同样操作">安装harbor（两台ecs都需同样操作）</h4>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="o">[</span>root@cf ~<span class="o">]</span><span class="c1">#tar xzvf harbor-online-installer-v2.6.2.tgz -C /usr/local/</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@cf ~<span class="o">]</span><span class="c1">#cd harbor/</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@cf ~<span class="o">]</span><span class="c1">#cp harbor.yml.tmpl harbor.yml</span>
+</span></span><span class="line"><span class="cl">cat harbor.yml
+</span></span><span class="line"><span class="cl">hostname: harbor.abc-test.com
+</span></span><span class="line"><span class="cl">http:
+</span></span><span class="line"><span class="cl">  port: <span class="m">80</span>
+</span></span><span class="line"><span class="cl">external_url: https://harbor.abc-test.com
+</span></span><span class="line"><span class="cl">harbor_admin_password: Harbor12345
+</span></span><span class="line"><span class="cl">data_volume: /data/harbor <span class="c1">#这个就是nas挂载的具体路径 一定记得改</span>
+</span></span><span class="line"><span class="cl">external_database:
+</span></span><span class="line"><span class="cl">  harbor:
+</span></span><span class="line"><span class="cl">    host: postgresql10.xx.xx
+</span></span><span class="line"><span class="cl">    port: <span class="m">3306</span>
+</span></span><span class="line"><span class="cl">    db_name: registry
+</span></span><span class="line"><span class="cl">    username: postgresadmin你设定的用户名
+</span></span><span class="line"><span class="cl">    password: 你自己的密码
+</span></span><span class="line"><span class="cl">    ssl_mode: disable
+</span></span><span class="line"><span class="cl">    max_idle_conns: <span class="m">10</span>
+</span></span><span class="line"><span class="cl">    max_open_conns: <span class="m">500</span>
+</span></span><span class="line"><span class="cl">  notary_signer:
+</span></span><span class="line"><span class="cl">    host: postgresql10.xx.xx
+</span></span><span class="line"><span class="cl">    port: <span class="m">3306</span>
+</span></span><span class="line"><span class="cl">    db_name: notarysigner
+</span></span><span class="line"><span class="cl">    username: postgresadmin你设定的用户名
+</span></span><span class="line"><span class="cl">    password: 你自己的密码
+</span></span><span class="line"><span class="cl">    ssl_mode: disable
+</span></span><span class="line"><span class="cl">  notary_server:
+</span></span><span class="line"><span class="cl">    host: postgresql10.xx.xx
+</span></span><span class="line"><span class="cl">    port: <span class="m">3306</span>
+</span></span><span class="line"><span class="cl">    db_name: notaryserver
+</span></span><span class="line"><span class="cl">    username: postgresadmin你设定的用户名
+</span></span><span class="line"><span class="cl">    password: 你自己的密码
+</span></span><span class="line"><span class="cl">    ssl_mode: disable
+</span></span><span class="line"><span class="cl">external_redis:
+</span></span><span class="line"><span class="cl">  host: xx.xx.xx:6379
+</span></span><span class="line"><span class="cl">  password: redisxxxx
+</span></span><span class="line"><span class="cl">  registry_db_index: <span class="m">1</span>
+</span></span><span class="line"><span class="cl">  jobservice_db_index: <span class="m">2</span>
+</span></span><span class="line"><span class="cl">  chartmuseum_db_index: <span class="m">3</span>
+</span></span><span class="line"><span class="cl">  trivy_db_index: <span class="m">5</span>
+</span></span><span class="line"><span class="cl">  idle_timeout_seconds: <span class="m">30</span>
+</span></span><span class="line"><span class="cl">metric:
+</span></span><span class="line"><span class="cl">   enabled: <span class="nb">true</span>
+</span></span><span class="line"><span class="cl">   port: <span class="m">9090</span>
+</span></span><span class="line"><span class="cl">   path: /metrics
+</span></span></code></pre></div><p><strong>注意我这里https这一层是设置在lb的，往harbor转的时候转的是http。但是这里的external_url一定要设置你真正外网想要访问的url</strong></p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="nb">cd</span> /usr/local/harbor
+</span></span><span class="line"><span class="cl">./install.sh
+</span></span></code></pre></div><h2 id="lb配置">lb配置</h2>
+<p>主要目的就是</p>
+<p><a href="https://harbor.abc-test.com" target="_blank" rel="noopener noreffer ">https://harbor.abc-test.com</a> =》 后端两台实例的harbor80端口,域名证书都在lb上操作。</p>
+<p><strong>注意这里一定记得lb开启ip hash。</strong></p>
+<p>此次省略域名解析操作。</p>
+<h2 id="测试">测试</h2>
+<h3 id="登录harbor仓库">登录harbor仓库</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># docker login harbor.abc-test.com</span>
+</span></span><span class="line"><span class="cl">Username: admin
+</span></span><span class="line"><span class="cl">Password: 
+</span></span><span class="line"><span class="cl">WARNING! Your password will be stored unencrypted in /root/.docker/config.json.
+</span></span><span class="line"><span class="cl">Configure a credential helper to remove this warning. See
+</span></span><span class="line"><span class="cl">https://docs.docker.com/engine/reference/commandline/login/#credentials-store
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Login Succeeded
+</span></span></code></pre></div><h3 id="上传镜像">上传镜像</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="o">[</span>root@master ~<span class="o">]</span><span class="c1"># docker push harbor.abc-test.com/library/nginx</span>
+</span></span><span class="line"><span class="cl">Using default tag: latest
+</span></span><span class="line"><span class="cl">The push refers to repository <span class="o">[</span>registry.cloudcele.com/library/nginx<span class="o">]</span>
+</span></span><span class="line"><span class="cl">d9eb91d66e2a: Pushed 
+</span></span><span class="line"><span class="cl">ae1f545e4c08: Pushed 
+</span></span><span class="line"><span class="cl">c20672db3628: Pushed 
+</span></span><span class="line"><span class="cl">4cbb728cd302: Pushing <span class="o">[=</span>&gt;                                                 <span class="o">]</span>  1.609MB/63.74MB
+</span></span><span class="line"><span class="cl">4cbb728cd302: Pushed 
+</span></span><span class="line"><span class="cl">9eb82f04c782: Pushed 
+</span></span><span class="line"><span class="cl">latest: digest: sha256:1a53eb723d17523512bd25c27299046cfa034cce309f4ed330c943a304513f59 size: <span class="m">1362</span>
+</span></span></code></pre></div><h3 id="拉取镜像">拉取镜像</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="o">[</span>root@master ~<span class="o">]</span><span class="c1"># docker pull harbor.abc-test.com/library/nginx</span>
+</span></span><span class="line"><span class="cl">Using default tag: latest
+</span></span><span class="line"><span class="cl">latest: Pulling from library/nginx
+</span></span><span class="line"><span class="cl">Digest: sha256:1a53eb723d17523512bd25c27299046cfa034cce309f4ed330c943a304513f59
+</span></span><span class="line"><span class="cl">harbor.abc-test.com/library/nginx:latest
+</span></span></code></pre></div></div><div class="post-footer" id="post-footer">
+    <div class="post-info">
+        <div class="post-info-line">
+            <div class="post-info-mod">
+                <span>Updated on 0001-01-01</span>
+            </div></div>
+        <div class="post-info-line">
+            <div class="post-info-md"></div>
+            <div class="post-info-share">
+                <span><a href="javascript:void(0);" title="Share on Twitter" data-sharer="twitter" data-url="http://example.org/posts/harbor-ha20230408/" data-title=""><i class="fab fa-twitter fa-fw" aria-hidden="true"></i></a><a href="javascript:void(0);" title="Share on Facebook" data-sharer="facebook" data-url="http://example.org/posts/harbor-ha20230408/"><i class="fab fa-facebook-square fa-fw" aria-hidden="true"></i></a><a href="javascript:void(0);" title="Share on Hacker News" data-sharer="hackernews" data-url="http://example.org/posts/harbor-ha20230408/" data-title=""><i class="fab fa-hacker-news fa-fw" aria-hidden="true"></i></a><a href="javascript:void(0);" title="Share on Line" data-sharer="line" data-url="http://example.org/posts/harbor-ha20230408/" data-title=""><i data-svg-src="https://cdn.jsdelivr.net/npm/simple-icons@7.3.0/icons/line.svg" aria-hidden="true"></i></a><a href="javascript:void(0);" title="Share on 微博" data-sharer="weibo" data-url="http://example.org/posts/harbor-ha20230408/" data-title=""><i class="fab fa-weibo fa-fw" aria-hidden="true"></i></a></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="post-info-more">
+        <section class="post-tags"></section>
+        <section>
+            <span><a href="javascript:void(0);" onclick="window.history.back();">Back</a></span>&nbsp;|&nbsp;<span><a href="/">Home</a></span>
+        </section>
+    </div>
+
+    <div class="post-nav">
+            <a href="/posts/first_post/" class="next" rel="next" title="First_post">First_post<i class="fas fa-angle-right fa-fw" aria-hidden="true"></i></a></div>
+</div>
+</article></div>
+            </main><footer class="footer">
+        <div class="footer-container"><div class="footer-line">Powered by <a href="https://gohugo.io/" target="_blank" rel="noopener noreffer" title="Hugo 0.110.0">Hugo</a> | Theme - <a href="https://github.com/dillonzq/LoveIt" target="_blank" rel="noopener noreffer" title="LoveIt 0.2.11"><i class="far fa-kiss-wink-heart fa-fw" aria-hidden="true"></i> LoveIt</a>
+                </div><div class="footer-line" itemscope itemtype="http://schema.org/CreativeWork"><i class="far fa-copyright fa-fw" aria-hidden="true"></i><span itemprop="copyrightYear">2019 - 2023</span><span class="author" itemprop="copyrightHolder">&nbsp;<a href="/" target="_blank">mrfireboy</a></span>&nbsp;|&nbsp;<span class="license"><a rel="license external nofollow noopener noreffer" href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank">CC BY-NC 4.0</a></span></div>
+        </div>
+    </footer></div>
+
+        <div id="fixed-buttons"><a href="#" id="back-to-top" class="fixed-button" title="Back to Top">
+                <i class="fas fa-arrow-up fa-fw" aria-hidden="true"></i>
+            </a><a href="#" id="view-comments" class="fixed-button" title="View Comments">
+                <i class="fas fa-comment fa-fw" aria-hidden="true"></i>
+            </a>
+        </div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css"><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/autocomplete.js@0.38.1/dist/autocomplete.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/lazysizes@5.3.2/lazysizes.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/clipboard@2.0.11/dist/clipboard.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/sharer.js@0.5.1/sharer.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/typeit@8.6.0/dist/index.umd.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/contrib/auto-render.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/contrib/copy-tex.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/contrib/mhchem.min.js"></script><script type="text/javascript">window.config={"code":{"copyTitle":"Copy to clipboard","maxShownLines":50},"comment":{},"data":{"id-1":"MrFireBoy's Blog","id-2":"MrFireBoy's Blog"},"math":{"delimiters":[{"display":true,"left":"$$","right":"$$"},{"display":true,"left":"\\[","right":"\\]"},{"display":true,"left":"\\begin{equation}","right":"\\end{equation}"},{"display":true,"left":"\\begin{equation*}","right":"\\end{equation*}"},{"display":true,"left":"\\begin{align}","right":"\\end{align}"},{"display":true,"left":"\\begin{align*}","right":"\\end{align*}"},{"display":true,"left":"\\begin{alignat}","right":"\\end{alignat}"},{"display":true,"left":"\\begin{alignat*}","right":"\\end{alignat*}"},{"display":true,"left":"\\begin{gather}","right":"\\end{gather}"},{"display":true,"left":"\\begin{CD}","right":"\\end{CD}"},{"display":false,"left":"$","right":"$"},{"display":false,"left":"\\(","right":"\\)"}],"strict":false},"search":{"highlightTag":"em","lunrIndexURL":"/index.json","maxResultLength":10,"noResultsFound":"No results found","snippetLength":30,"type":"lunr"},"typeit":{"cursorChar":"|","cursorSpeed":1000,"data":{"id-1":["id-1"],"id-2":["id-2"]},"duration":-1,"speed":100}};</script><script type="text/javascript" src="/js/theme.min.js"></script></body>
+</html>

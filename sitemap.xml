@@ -8,4 +8,5 @@
             <loc>http://example.org/categories/linux/</loc><lastmod>2023-02-15T23:13:16&#43;08:00</lastmod></url><url>
             <loc>http://example.org/</loc><lastmod>2023-02-15T23:13:16&#43;08:00</lastmod></url><url>
             <loc>http://example.org/posts/</loc><lastmod>2023-02-15T23:13:16&#43;08:00</lastmod></url><url>
-            <loc>http://example.org/tags/</loc><lastmod>2023-02-15T23:13:16&#43;08:00</lastmod></url></urlset>
+            <loc>http://example.org/tags/</loc><lastmod>2023-02-15T23:13:16&#43;08:00</lastmod></url><url>
+            <loc>http://example.org/posts/harbor-ha20230408/</loc></url></urlset>
