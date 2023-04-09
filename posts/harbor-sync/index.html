@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="robots" content="noodp" />
+        <title>Harbor Sync - Mrfireboy</title><meta name="Description" content="宝剑锋从磨砺出"><meta property="og:title" content="Harbor Sync" />
+<meta property="og:description" content="harbor同步的那些事 几个同步方案的对比 harbor镜像复制 skopeo image-syncer 手工 机制 基于策略的内容实现：支持多种过滤与多种触发模式且实现对推送或拉模式的支持 直接将blob复制到另一个 1.同步只经过内存和网络，不依赖磁盘，同步速度快2.支持增量同步3.支持并发同步4.支持自动重试机制 拷贝镜像数据&#43;导入导出PG数据库数据 官方文档 Harbor docs | Configuring Replication (goharbor.io) https://github.com/containers/skopeo https://github.com/AliyunContainerService/image-syncer 优点 界面配置，无需编码 1.单机和高可用harbor都可用 2.传输效率高，不依赖docker 1.传输效率高2.高可用支持 耗时短 缺点 失败率较高 centos7默认版本低 数据存储拷贝依赖cp harbor image规范 docker image url (registry/namespace/repository:tag) #例子 harbor.abc-test.com/demo/nginx:v1 实际操作中很多公司在repository很多会有很多/ 例如harbor.abc-test.com/demo/prod/nginx:v1 你理解成这样harbor.abc-test.com/demo/&#34;prod/nginx&#34;:v1 统一下这个规范后面讲到的会与这个有关！
+harbor实践案例 背景介绍 因为组织关系原因，集团下有很多分公司，每个公司又有技术人员搭建了各自的harbor，甚至很多人每个项目搭建一个harbor，这样公司没有统一的harbor镜像仓库，维护的harbor又是散乱，资源又很浪费。
+方案实践踩坑 实际上如果harbor自带的镜像复制应该是非常好的功能，但是我用下来发现失败率比较高，并且1.0和2.0版本应该是无法直接使用的。 手工的这种方案因为我这里是要把多个harbor实例的内容合并到一个harbor所以也不适用 skopeo和image-syncer我都用了下，但是一个很疑惑的就是为什么不能根据namespace迁移，而需要repository级别才能迁移，并且repository有些也迁移失败！ 最终方案 自己结合harbor 2.0的api，获取老harbor的namespace，然后调用新的harbor创建新的namespace，
+获取repository，利用docker pull tag push推送该repository下的第一个镜像，然后剩下的利用image-syncer一次性同步该repository。
+目录准备 #mkdir -p /usr/local/image-syncer/ #cd /usr/local/image-syncer/ #ll -rw-r----- 1 root root 325 Apr 7 14:31 auth." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://example.org/posts/harbor-sync/" /><meta property="og:image" content="http://example.org/logo.png"/><meta property="article:section" content="posts" />
+<meta property="article:published_time" content="2023-04-09T16:43:47+08:00" />
+<meta property="article:modified_time" content="2023-04-09T16:43:47+08:00" /><meta property="og:site_name" content="mrfireboy" />
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:image" content="http://example.org/logo.png"/>
+
+<meta name="twitter:title" content="Harbor Sync"/>
+<meta name="twitter:description" content="harbor同步的那些事 几个同步方案的对比 harbor镜像复制 skopeo image-syncer 手工 机制 基于策略的内容实现：支持多种过滤与多种触发模式且实现对推送或拉模式的支持 直接将blob复制到另一个 1.同步只经过内存和网络，不依赖磁盘，同步速度快2.支持增量同步3.支持并发同步4.支持自动重试机制 拷贝镜像数据&#43;导入导出PG数据库数据 官方文档 Harbor docs | Configuring Replication (goharbor.io) https://github.com/containers/skopeo https://github.com/AliyunContainerService/image-syncer 优点 界面配置，无需编码 1.单机和高可用harbor都可用 2.传输效率高，不依赖docker 1.传输效率高2.高可用支持 耗时短 缺点 失败率较高 centos7默认版本低 数据存储拷贝依赖cp harbor image规范 docker image url (registry/namespace/repository:tag) #例子 harbor.abc-test.com/demo/nginx:v1 实际操作中很多公司在repository很多会有很多/ 例如harbor.abc-test.com/demo/prod/nginx:v1 你理解成这样harbor.abc-test.com/demo/&#34;prod/nginx&#34;:v1 统一下这个规范后面讲到的会与这个有关！
+harbor实践案例 背景介绍 因为组织关系原因，集团下有很多分公司，每个公司又有技术人员搭建了各自的harbor，甚至很多人每个项目搭建一个harbor，这样公司没有统一的harbor镜像仓库，维护的harbor又是散乱，资源又很浪费。
+方案实践踩坑 实际上如果harbor自带的镜像复制应该是非常好的功能，但是我用下来发现失败率比较高，并且1.0和2.0版本应该是无法直接使用的。 手工的这种方案因为我这里是要把多个harbor实例的内容合并到一个harbor所以也不适用 skopeo和image-syncer我都用了下，但是一个很疑惑的就是为什么不能根据namespace迁移，而需要repository级别才能迁移，并且repository有些也迁移失败！ 最终方案 自己结合harbor 2.0的api，获取老harbor的namespace，然后调用新的harbor创建新的namespace，
+获取repository，利用docker pull tag push推送该repository下的第一个镜像，然后剩下的利用image-syncer一次性同步该repository。
+目录准备 #mkdir -p /usr/local/image-syncer/ #cd /usr/local/image-syncer/ #ll -rw-r----- 1 root root 325 Apr 7 14:31 auth."/>
+<meta name="application-name" content="mrfireboy">
+<meta name="apple-mobile-web-app-title" content="mrfireboy"><meta name="theme-color" content="#ffffff"><meta name="msapplication-TileColor" content="#da532c"><link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5"><link rel="manifest" href="/site.webmanifest"><link rel="canonical" href="http://example.org/posts/harbor-sync/" /><link rel="prev" href="http://example.org/posts/harbor-ha20230408/" /><link rel="stylesheet" href="/css/style.min.css"><link rel="preload" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.1.1/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+        <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.1.1/css/all.min.css"></noscript><link rel="preload" href="https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+        <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css"></noscript><script type="application/ld+json">
+    {
+        "@context": "http://schema.org",
+        "@type": "BlogPosting",
+        "headline": "Harbor Sync",
+        "inLanguage": "en",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "http:\/\/example.org\/posts\/harbor-sync\/"
+        },"genre": "posts","keywords": "harbor","wordcount":  257 ,
+        "url": "http:\/\/example.org\/posts\/harbor-sync\/","datePublished": "2023-04-09T16:43:47+08:00","dateModified": "2023-04-09T16:43:47+08:00","publisher": {
+            "@type": "Organization",
+            "name": ""},"author": {
+                "@type": "Person",
+                "name": "mrfireboy"
+            },"description": ""
+    }
+    </script></head>
+    <body data-header-desktop="fixed" data-header-mobile="auto"><script type="text/javascript">(window.localStorage && localStorage.getItem('theme') ? localStorage.getItem('theme') === 'dark' : ('auto' === 'auto' ? window.matchMedia('(prefers-color-scheme: dark)').matches : 'auto' === 'dark')) && document.body.setAttribute('theme', 'dark');</script>
+
+        <div id="mask"></div><div class="wrapper"><header class="desktop" id="header-desktop">
+    <div class="header-wrapper">
+        <div class="header-title">
+            <a href="/" title="Mrfireboy"><span id="id-1" class="typeit"></span></a>
+        </div>
+        <div class="menu">
+            <div class="menu-inner"><a class="menu-item" href="/posts/"> Posts </a><a class="menu-item" href="/tags/"> Tags </a><a class="menu-item" href="/categories/"> Categories </a><a class="menu-item" href="/docs/"> Docs </a><a class="menu-item" href="/about/"> About </a><span class="menu-item delimiter"></span><span class="menu-item search" id="search-desktop">
+                        <input type="text" placeholder="Search titles or contents..." id="search-input-desktop">
+                        <a href="javascript:void(0);" class="search-button search-toggle" id="search-toggle-desktop" title="Search">
+                            <i class="fas fa-search fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <a href="javascript:void(0);" class="search-button search-clear" id="search-clear-desktop" title="Clear">
+                            <i class="fas fa-times-circle fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <span class="search-button search-loading" id="search-loading-desktop">
+                            <i class="fas fa-spinner fa-fw fa-spin" aria-hidden="true"></i>
+                        </span>
+                    </span><a href="javascript:void(0);" class="menu-item theme-switch" title="Switch Theme">
+                    <i class="fas fa-adjust fa-fw" aria-hidden="true"></i>
+                </a></div>
+        </div>
+    </div>
+</header><header class="mobile" id="header-mobile">
+    <div class="header-container">
+        <div class="header-wrapper">
+            <div class="header-title">
+                <a href="/" title="Mrfireboy"><span id="id-2" class="typeit"></span></a>
+            </div>
+            <div class="menu-toggle" id="menu-toggle-mobile">
+                <span></span><span></span><span></span>
+            </div>
+        </div>
+        <div class="menu" id="menu-mobile"><div class="search-wrapper">
+                    <div class="search mobile" id="search-mobile">
+                        <input type="text" placeholder="Search titles or contents..." id="search-input-mobile">
+                        <a href="javascript:void(0);" class="search-button search-toggle" id="search-toggle-mobile" title="Search">
+                            <i class="fas fa-search fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <a href="javascript:void(0);" class="search-button search-clear" id="search-clear-mobile" title="Clear">
+                            <i class="fas fa-times-circle fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <span class="search-button search-loading" id="search-loading-mobile">
+                            <i class="fas fa-spinner fa-fw fa-spin" aria-hidden="true"></i>
+                        </span>
+                    </div>
+                    <a href="javascript:void(0);" class="search-cancel" id="search-cancel-mobile">
+                        Cancel
+                    </a>
+                </div><a class="menu-item" href="/posts/" title="">Posts</a><a class="menu-item" href="/tags/" title="">Tags</a><a class="menu-item" href="/categories/" title="">Categories</a><a class="menu-item" href="/docs/" title="">Docs</a><a class="menu-item" href="/about/" title="">About</a><a href="javascript:void(0);" class="menu-item theme-switch" title="Switch Theme">
+                <i class="fas fa-adjust fa-fw" aria-hidden="true"></i>
+            </a></div>
+    </div>
+</header><div class="search-dropdown desktop">
+        <div id="search-dropdown-desktop"></div>
+    </div>
+    <div class="search-dropdown mobile">
+        <div id="search-dropdown-mobile"></div>
+    </div><main class="main">
+                <div class="container"><div class="toc" id="toc-auto">
+            <h2 class="toc-title">Contents</h2>
+            <div class="toc-content" id="toc-content-auto"></div>
+        </div><article class="page single"><h1 class="single-title animate__animated animate__flipInX">Harbor Sync</h1><div class="post-meta">
+            <div class="post-meta-line"><span class="post-author"><a href="/" title="Author" rel="author" class="author"><i class="fas fa-user-circle fa-fw" aria-hidden="true"></i>mrfireboy</a></span>&nbsp;<span class="post-category">included in <a href="/categories/k8s/"><i class="far fa-folder fa-fw" aria-hidden="true"></i>k8s</a>&nbsp;<a href="/categories/docker/"><i class="far fa-folder fa-fw" aria-hidden="true"></i>docker</a></span></div>
+            <div class="post-meta-line"><i class="far fa-calendar-alt fa-fw" aria-hidden="true"></i>&nbsp;<time datetime="2023-04-09">2023-04-09</time>&nbsp;<i class="fas fa-pencil-alt fa-fw" aria-hidden="true"></i>&nbsp;257 words&nbsp;
+                <i class="far fa-clock fa-fw" aria-hidden="true"></i>&nbsp;2 minutes&nbsp;</div>
+        </div><div class="details toc" id="toc-static"  data-kept="true">
+                <div class="details-summary toc-title">
+                    <span>Contents</span>
+                    <span><i class="details-icon fas fa-angle-right" aria-hidden="true"></i></span>
+                </div>
+                <div class="details-content toc-content" id="toc-content-static"><nav id="TableOfContents">
+  <ul>
+    <li><a href="#几个同步方案的对比">几个同步方案的对比</a></li>
+    <li><a href="#harbor-image规范">harbor image规范</a></li>
+    <li><a href="#harbor实践案例">harbor实践案例</a>
+      <ul>
+        <li><a href="#背景介绍">背景介绍</a></li>
+        <li><a href="#方案实践踩坑">方案实践踩坑</a></li>
+        <li><a href="#最终方案">最终方案</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav></div>
+            </div><div class="content" id="content"><h1 id="harbor同步的那些事">harbor同步的那些事</h1>
+<h2 id="几个同步方案的对比">几个同步方案的对比</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>harbor镜像复制</th>
+<th>skopeo</th>
+<th>image-syncer</th>
+<th>手工</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>机制</td>
+<td>基于策略的内容实现：支持多种过滤与多种触发模式且实现对推送或拉模式的支持</td>
+<td>直接将blob复制到另一个</td>
+<td>1.同步只经过内存和网络，不依赖磁盘，同步速度快<!-- raw HTML omitted -->2.支持增量同步<!-- raw HTML omitted -->3.支持并发同步<!-- raw HTML omitted -->4.支持自动重试机制</td>
+<td>拷贝镜像数据+导入导出PG数据库数据</td>
+</tr>
+<tr>
+<td>官方文档</td>
+<td><a href="https://goharbor.io/docs/2.7.0/administration/configuring-replication/" target="_blank" rel="noopener noreffer ">Harbor docs | Configuring Replication (goharbor.io)</a></td>
+<td><a href="https://github.com/containers/skopeo" target="_blank" rel="noopener noreffer ">https://github.com/containers/skopeo</a></td>
+<td><a href="https://github.com/AliyunContainerService/image-syncer" target="_blank" rel="noopener noreffer ">https://github.com/AliyunContainerService/image-syncer</a></td>
+<td></td>
+</tr>
+<tr>
+<td>优点</td>
+<td>界面配置，无需编码</td>
+<td>1.单机和高可用harbor都可用   <!-- raw HTML omitted -->2.传输效率高，不依赖docker</td>
+<td>1.传输效率高<!-- raw HTML omitted -->2.高可用支持</td>
+<td>耗时短</td>
+</tr>
+<tr>
+<td>缺点</td>
+<td>失败率较高</td>
+<td>centos7默认版本低</td>
+<td></td>
+<td>数据存储拷贝依赖cp</td>
+</tr>
+</tbody>
+</table>
+<h2 id="harbor-image规范">harbor image规范</h2>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker image url <span class="o">(</span>registry/namespace/repository:tag<span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#例子</span>
+</span></span><span class="line"><span class="cl">harbor.abc-test.com/demo/nginx:v1
+</span></span><span class="line"><span class="cl">实际操作中很多公司在repository很多会有很多/
+</span></span><span class="line"><span class="cl">例如harbor.abc-test.com/demo/prod/nginx:v1
+</span></span><span class="line"><span class="cl">你理解成这样harbor.abc-test.com/demo/<span class="s2">&#34;prod/nginx&#34;</span>:v1
+</span></span></code></pre></div><p>统一下这个规范后面讲到的会与这个有关！</p>
+<h2 id="harbor实践案例">harbor实践案例</h2>
+<h3 id="背景介绍">背景介绍</h3>
+<p>因为组织关系原因，集团下有很多分公司，每个公司又有技术人员搭建了各自的harbor，甚至很多人每个项目搭建一个harbor，这样公司没有统一的harbor镜像仓库，维护的harbor又是散乱，资源又很浪费。</p>
+<h3 id="方案实践踩坑">方案实践踩坑</h3>
+<ol>
+<li>实际上如果harbor自带的镜像复制应该是非常好的功能，但是我用下来发现失败率比较高，并且1.0和2.0版本应该是无法直接使用的。</li>
+<li>手工的这种方案因为我这里是要把多个harbor实例的内容合并到一个harbor所以也不适用</li>
+<li>skopeo和image-syncer我都用了下，但是一个很疑惑的就是为什么不能根据namespace迁移，而需要repository级别才能迁移，并且repository有些也迁移失败！</li>
+</ol>
+<h3 id="最终方案">最终方案</h3>
+<p>自己结合harbor 2.0的api，获取老harbor的namespace，然后调用新的harbor创建新的namespace，</p>
+<p>获取repository，利用docker pull tag push推送该repository下的第一个镜像，然后剩下的利用image-syncer一次性同步该repository。</p>
+<p><img
+        class="lazyload"
+        src="/svg/loading.min.svg"
+        data-src="../images/harbor%e5%90%8c%e6%ad%a5%e5%9b%be.png"
+        data-srcset="../images/harbor%e5%90%8c%e6%ad%a5%e5%9b%be.png, ../images/harbor%e5%90%8c%e6%ad%a5%e5%9b%be.png 1.5x, ../images/harbor%e5%90%8c%e6%ad%a5%e5%9b%be.png 2x"
+        data-sizes="auto"
+        alt="../images/harbor同步图.png"
+        title="harbor同步图" /></p>
+<h4 id="目录准备">目录准备</h4>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1">#mkdir -p /usr/local/image-syncer/</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#cd /usr/local/image-syncer/</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#ll</span>
+</span></span><span class="line"><span class="cl">-rw-r----- <span class="m">1</span> root root      <span class="m">325</span> Apr  <span class="m">7</span> 14:31 auth.json
+</span></span><span class="line"><span class="cl">-rw-r----- <span class="m">1</span> root root       <span class="m">83</span> Apr  <span class="m">7</span> 14:41 images.json
+</span></span><span class="line"><span class="cl">-rw-r----- <span class="m">1</span> root root      <span class="m">105</span> Apr  <span class="m">7</span> 14:32 images.json.template
+</span></span><span class="line"><span class="cl">-rwxr-x--- <span class="m">1</span> root root <span class="m">14913281</span> Apr  <span class="m">6</span> 11:20 image-syncer
+</span></span><span class="line"><span class="cl">-rw-r----- <span class="m">1</span> root root     <span class="m">3049</span> Apr  <span class="m">7</span> 14:43 sync-image-cf.sh
+</span></span><span class="line"><span class="cl"><span class="c1">#auth.json 是image-syncer对应的权限文件</span>
+</span></span><span class="line"><span class="cl">cat auth.json
+</span></span><span class="line"><span class="cl"><span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;harbor.abc-test.com&#34;</span>: <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="s2">&#34;username&#34;</span>: <span class="s2">&#34;admin&#34;</span>,
+</span></span><span class="line"><span class="cl">        <span class="s2">&#34;password&#34;</span>: <span class="s2">&#34;Harbor12345&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>,
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;harbor1.abc-test.com&#34;</span>: <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="s2">&#34;username&#34;</span>: <span class="s2">&#34;admin&#34;</span>,
+</span></span><span class="line"><span class="cl">        <span class="s2">&#34;password&#34;</span>: <span class="s2">&#34;Harbor12345&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#images.json 是image-syncer的镜像申明文件</span>
+</span></span><span class="line"><span class="cl">cat images.json 
+</span></span><span class="line"><span class="cl"><span class="o">{</span>
+</span></span><span class="line"><span class="cl">     <span class="s2">&#34;harbor.abc-test.com/basic/jdk&#34;</span>: <span class="s2">&#34;harbor.abc-test.com/basic/jdk&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#images.json.template 是我建立的文件，后面脚本会用到</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#namespace-repository可以理解为我写的一个变量，后面利用这个变量去替换每一个namespace/repository的组合来达到循环同步的目的</span>
+</span></span><span class="line"><span class="cl"><span class="o">{</span>
+</span></span><span class="line"><span class="cl">     <span class="s2">&#34;harbor1.abc-test.com/namespace-repository&#34;</span>: <span class="s2">&#34;harbor.abc-test.com/namespace-repository&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#image-syncer是阿里云image-syncer的脚本文件</span>
+</span></span><span class="line"><span class="cl">具体参考https://github.com/AliyunContainerService/image-syncer/releases/tag 下载对应的release解压即可
+</span></span><span class="line"><span class="cl"><span class="c1">#sync-image-cf.sh是我结合自己的业务完成的脚本</span>
+</span></span></code></pre></div><h4 id="sync-image-cfsh说明">sync-image-cf.sh说明</h4>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="cp">#!/bin/bash
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span>
+</span></span><span class="line"><span class="cl"><span class="nv">old_harbor</span><span class="o">=</span><span class="s2">&#34;harbor1.abc-test.com&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nv">new_harbor</span><span class="o">=</span><span class="s2">&#34;harbor.abc-test.com&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nv">old_admin</span><span class="o">=</span><span class="s2">&#34;Harbor12345&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nv">new_admin</span><span class="o">=</span><span class="s2">&#34;Harbor12345&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#1. 获取老的harbor namespace/repository清单</span>
+</span></span><span class="line"><span class="cl"><span class="k">for</span> i in <span class="sb">`</span>curl  -u <span class="s2">&#34;admin:</span><span class="nv">$old_admin</span><span class="s2">&#34;</span> http://<span class="nv">$old_harbor</span>/v2/_catalog 2&gt;/dev/null <span class="p">|</span> jq .repositories<span class="o">[]</span> <span class="p">|</span> tr -d <span class="s1">&#39;&#34;&#39;</span> <span class="s2">&#34;`;do
+</span></span></span><span class="line"><span class="cl"><span class="s2">   project_name=`echo &#34;</span><span class="nv">$i</span><span class="s2">&#34; | awk -F&#34;</span>/<span class="s2">&#34; &#39;{print </span><span class="nv">$1</span><span class="s2">}&#39;`
+</span></span></span><span class="line"><span class="cl"><span class="s2">   echo &#34;</span><span class="o">======</span>start  project/repository:<span class="nv">$i</span><span class="o">=============</span><span class="s2">&#34;
+</span></span></span><span class="line"><span class="cl"><span class="s2">   #调用api创建project
+</span></span></span><span class="line"><span class="cl"><span class="s2">   curl  -u &#34;</span>admin:<span class="nv">$new_admin</span><span class="s2">&#34; -X POST -H &#34;</span>Content-Type: application/json<span class="s2">&#34; &#34;</span>https://<span class="nv">$new_harbor</span>/api/v2.0/projects<span class="s2">&#34; -d &#34;</span><span class="o">{</span><span class="se">\&#34;</span>project_name<span class="se">\&#34;</span>:<span class="se">\&#34;</span><span class="nv">$project_name</span><span class="se">\&#34;</span><span class="o">}</span><span class="s2">&#34;
+</span></span></span><span class="line"><span class="cl"><span class="s2">   #获取tags
+</span></span></span><span class="line"><span class="cl"><span class="s2">   tags=`curl -u &#34;</span>admin:<span class="nv">$old_admin</span><span class="s2">&#34; http://</span><span class="nv">$old_harbor</span><span class="s2">/v2/&#34;</span><span class="nv">$i</span><span class="s2">&#34;/tags/list 2&gt;/dev/null|jq &#34;</span>.tags<span class="o">[]</span><span class="s2">&#34;|tr -d &#39;&#34;</span><span class="err">&#39;</span><span class="sb">`</span>
+</span></span><span class="line"><span class="cl">   <span class="k">for</span> j in <span class="sb">`</span><span class="nb">echo</span> <span class="nv">$tags</span><span class="sb">`</span><span class="p">;</span><span class="k">do</span>
+</span></span><span class="line"><span class="cl">     <span class="nb">echo</span> <span class="s2">&#34;===start pulling </span><span class="nv">$old_harbor</span><span class="s2">/</span><span class="nv">$i</span><span class="s2">:</span><span class="nv">$j</span><span class="s2">==&#34;</span>
+</span></span><span class="line"><span class="cl">     docker pull <span class="nv">$old_harbor</span>/<span class="nv">$i</span>:<span class="nv">$j</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">     <span class="nb">echo</span> <span class="s2">&#34;===start tag </span><span class="nv">$new_harbor</span><span class="s2">/</span><span class="nv">$i</span><span class="s2">:</span><span class="nv">$j</span><span class="s2">==&#34;</span>
+</span></span><span class="line"><span class="cl">     docker tag <span class="nv">$old_harbor</span>/<span class="nv">$i</span>:<span class="nv">$j</span> <span class="nv">$new_harbor</span>/<span class="nv">$i</span>:<span class="nv">$j</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">     <span class="nb">echo</span> <span class="s2">&#34;===start push </span><span class="nv">$new_harbor</span><span class="s2">/</span><span class="nv">$i</span><span class="s2">:</span><span class="nv">$j</span><span class="s2">==&#34;</span>
+</span></span><span class="line"><span class="cl">     docker push <span class="nv">$new_harbor</span>/<span class="nv">$i</span>:<span class="nv">$j</span>
+</span></span><span class="line"><span class="cl">     <span class="nb">echo</span> <span class="s2">&#34;===start sync </span><span class="nv">$new_harbor</span><span class="s2">/</span><span class="nv">$i</span><span class="s2">:allin========&#34;</span>
+</span></span><span class="line"><span class="cl">     <span class="c1">#image-syncer 全量同步一次</span>
+</span></span><span class="line"><span class="cl">     <span class="c1">#1. 替换images.json文件</span>
+</span></span><span class="line"><span class="cl">     <span class="c1"># &#34;harbor1.abc-test.com/namespace-repository&#34;: &#34;harbor.abc-test.com/namespace-repository</span>
+</span></span><span class="line"><span class="cl">     cp -f /usr/local/image-syncer/images.json.template /usr/local/image-syncer/images.json
+</span></span><span class="line"><span class="cl">     sed -i  <span class="s2">&#34;s%namespace-repository%</span><span class="nv">$i</span><span class="s2">%g&#34;</span> /usr/local/image-syncer/images.json
+</span></span><span class="line"><span class="cl">     /usr/local/image-syncer/image-syncer --proc<span class="o">=</span><span class="m">6</span> --auth<span class="o">=</span>/usr/local/image-syncer/auth.json --images<span class="o">=</span>/usr/local/image-syncer/images.json --auth /root/.docker/config.json
+</span></span><span class="line"><span class="cl">   <span class="k">done</span>
+</span></span><span class="line"><span class="cl"><span class="k">done</span>
+</span></span></code></pre></div></div><div class="post-footer" id="post-footer">
+    <div class="post-info">
+        <div class="post-info-line">
+            <div class="post-info-mod">
+                <span>Updated on 2023-04-09</span>
+            </div></div>
+        <div class="post-info-line">
+            <div class="post-info-md"></div>
+            <div class="post-info-share">
+                <span><a href="javascript:void(0);" title="Share on Twitter" data-sharer="twitter" data-url="http://example.org/posts/harbor-sync/" data-title="Harbor Sync" data-hashtags="harbor"><i class="fab fa-twitter fa-fw" aria-hidden="true"></i></a><a href="javascript:void(0);" title="Share on Facebook" data-sharer="facebook" data-url="http://example.org/posts/harbor-sync/" data-hashtag="harbor"><i class="fab fa-facebook-square fa-fw" aria-hidden="true"></i></a><a href="javascript:void(0);" title="Share on Hacker News" data-sharer="hackernews" data-url="http://example.org/posts/harbor-sync/" data-title="Harbor Sync"><i class="fab fa-hacker-news fa-fw" aria-hidden="true"></i></a><a href="javascript:void(0);" title="Share on Line" data-sharer="line" data-url="http://example.org/posts/harbor-sync/" data-title="Harbor Sync"><i data-svg-src="https://cdn.jsdelivr.net/npm/simple-icons@7.3.0/icons/line.svg" aria-hidden="true"></i></a><a href="javascript:void(0);" title="Share on 微博" data-sharer="weibo" data-url="http://example.org/posts/harbor-sync/" data-title="Harbor Sync"><i class="fab fa-weibo fa-fw" aria-hidden="true"></i></a></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="post-info-more">
+        <section class="post-tags"><i class="fas fa-tags fa-fw" aria-hidden="true"></i>&nbsp;<a href="/tags/harbor/">harbor</a></section>
+        <section>
+            <span><a href="javascript:void(0);" onclick="window.history.back();">Back</a></span>&nbsp;|&nbsp;<span><a href="/">Home</a></span>
+        </section>
+    </div>
+
+    <div class="post-nav"><a href="/posts/harbor-ha20230408/" class="prev" rel="prev" title="harbor高可用"><i class="fas fa-angle-left fa-fw" aria-hidden="true"></i>harbor高可用</a></div>
+</div>
+<div id="comments"></div></article></div>
+            </main><footer class="footer">
+        <div class="footer-container"><div class="footer-line">Powered by <a href="https://gohugo.io/" target="_blank" rel="noopener noreffer" title="Hugo 0.110.0">Hugo</a> | Theme - <a href="https://github.com/dillonzq/LoveIt" target="_blank" rel="noopener noreffer" title="LoveIt 0.2.11"><i class="far fa-kiss-wink-heart fa-fw" aria-hidden="true"></i> LoveIt</a>
+                </div><div class="footer-line" itemscope itemtype="http://schema.org/CreativeWork"><i class="far fa-copyright fa-fw" aria-hidden="true"></i><span itemprop="copyrightYear">2019 - 2023</span><span class="author" itemprop="copyrightHolder">&nbsp;<a href="/" target="_blank">mrfireboy</a></span>&nbsp;|&nbsp;<span class="license"><a rel="license external nofollow noopener noreffer" href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank">CC BY-NC 4.0</a></span></div>
+        </div>
+    </footer></div>
+
+        <div id="fixed-buttons"><a href="#" id="back-to-top" class="fixed-button" title="Back to Top">
+                <i class="fas fa-arrow-up fa-fw" aria-hidden="true"></i>
+            </a><a href="#" id="view-comments" class="fixed-button" title="View Comments">
+                <i class="fas fa-comment fa-fw" aria-hidden="true"></i>
+            </a>
+        </div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@2.5.0/css/lightgallery-bundle.min.css"><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/autocomplete.js@0.38.1/dist/autocomplete.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/lazysizes@5.3.2/lazysizes.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/lightgallery@2.5.0/lightgallery.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/lightgallery@2.5.0/plugins/thumbnail/lg-thumbnail.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/lightgallery@2.5.0/plugins/zoom/lg-zoom.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/clipboard@2.0.11/dist/clipboard.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/sharer.js@0.5.1/sharer.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/typeit@8.6.0/dist/index.umd.js"></script><script type="text/javascript">window.config={"code":{"copyTitle":"Copy to clipboard","maxShownLines":50},"comment":{},"data":{"id-1":"MrFireBoy's Blog","id-2":"MrFireBoy's Blog"},"lightgallery":true,"search":{"highlightTag":"em","lunrIndexURL":"/index.json","maxResultLength":10,"noResultsFound":"No results found","snippetLength":30,"type":"lunr"},"typeit":{"cursorChar":"|","cursorSpeed":1000,"data":{"id-1":["id-1"],"id-2":["id-2"]},"duration":-1,"speed":100}};</script><script type="text/javascript" src="/js/theme.min.js"></script></body>
+</html>
